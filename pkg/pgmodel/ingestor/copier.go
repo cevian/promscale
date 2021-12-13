@@ -25,8 +25,9 @@ import (
 const maxInsertStmtPerTxn = 100
 
 type copyRequest struct {
-	data  *pendingBuffer
-	table string
+	data   *pendingBuffer
+	table  string
+	doneCh chan<- struct{}
 }
 
 var (
@@ -66,28 +67,20 @@ func (reqs copyBatch) VisitExemplar(callBack func(s *pgmodel.PromExemplars) erro
 // Handles actual insertion into the DB.
 // We have one of these per connection reserved for insertion.
 func runCopier(conn pgxconn.PgxConn, in chan readRequest, sw *seriesWriter, elf *ExemplarLabelFormatter) {
-	requestBatch := make([]readRequest, 0, maxInsertStmtPerTxn)
-	insertBatch := make([]copyRequest, 0, cap(requestBatch))
+	insertBatch := make([]copyRequest, 0, maxInsertStmtPerTxn)
 	for {
 		var ok bool
 
+		//TODO change comment
 		//fetch the batch of request upfront to make sure all of the
 		//requests fetched are for unique metrics. This is insured
 		//by the fact that the batcher only has one outstanding readRequest
 		//at a time and the fact that we fetch the entire batch before
 		//executing any of the reads. This guarantees that we never
 		//need to batch the same metrics together in the copier
-		requestBatch, ok = copierGetBatch(requestBatch, in)
+		insertBatch, ok = copierGetBatch(insertBatch, in)
 		if !ok {
 			return
-		}
-
-		for i := range requestBatch {
-			copyRequest, ok := <-requestBatch[i].copySender
-			if !ok {
-				continue
-			}
-			insertBatch = append(insertBatch, copyRequest)
 		}
 
 		// sort to prevent deadlocks on table locks
@@ -102,14 +95,12 @@ func runCopier(conn pgxconn.PgxConn, in chan readRequest, sw *seriesWriter, elf 
 				insertBatch[i].data.release()
 			}
 		}
-		for i := range requestBatch {
-			requestBatch[i] = readRequest{}
-		}
+
 		for i := range insertBatch {
+			insertBatch[i].doneCh <- struct{}{}
 			insertBatch[i] = copyRequest{}
 		}
 		insertBatch = insertBatch[:0]
-		requestBatch = requestBatch[:0]
 	}
 }
 
@@ -128,7 +119,7 @@ func persistBatch(conn pgxconn.PgxConn, sw *seriesWriter, elf *ExemplarLabelForm
 	return nil
 }
 
-func copierGetBatch(batch []readRequest, in <-chan readRequest) ([]readRequest, bool) {
+func copierGetBatch(batch []copyRequest, in <-chan readRequest) ([]copyRequest, bool) {
 	//This mutex is not for safety, but rather for better batching.
 	//It guarantees that only one copier is reading from the channel at one time
 	//This ensures bigger batches as well as less spread of a
@@ -140,7 +131,11 @@ func copierGetBatch(batch []readRequest, in <-chan readRequest) ([]readRequest, 
 	if !ok {
 		return batch, false
 	}
-	batch = append(batch, req)
+	copyRequest, ok := <-req.copySender
+	if !ok {
+		return batch, false
+	}
+	batch = append(batch, copyRequest)
 
 	//we use a small timeout to prevent low-pressure systems from using up too many
 	//txns and putting pressure on system
@@ -149,7 +144,11 @@ hot_gather:
 	for len(batch) < cap(batch) {
 		select {
 		case r2 := <-in:
-			batch = append(batch, r2)
+			copyRequest, ok := <-r2.copySender
+			if !ok {
+				return batch, false
+			}
+			batch = append(batch, copyRequest)
 		case <-timeout:
 			break hot_gather
 		}

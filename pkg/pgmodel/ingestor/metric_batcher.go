@@ -153,6 +153,7 @@ func runMetricBatcher(conn pgxconn.PgxConn,
 	//to the batcher to keep batching until the copier is ready to read.
 	copySender := make(chan copyRequest)
 	defer close(copySender)
+	doneRecv := make(chan struct{}, 2)
 	readRequest := readRequest{copySender: copySender}
 
 	for firstReq = range input {
@@ -192,36 +193,56 @@ func runMetricBatcher(conn pgxconn.PgxConn,
 	addReq(firstReq, pending)
 	copierReadRequestCh <- readRequest
 
-	for {
-		if pending.IsEmpty() {
-			req, ok := <-input
-			if !ok {
-				return
-			}
-			addReq(req, pending)
-			copierReadRequestCh <- readRequest
-		}
+	const (
+		WaitingSendData = iota
+		WaitingRecvDone
+	)
+	state := WaitingSendData
 
+	for {
 		recvCh := input
 		if pending.IsFull() {
 			recvCh = nil
 		}
-
-		numSeries := pending.batch.CountSeries()
-		select {
-		//try to send first, if not then keep batching
-		case copySender <- copyRequest{pending, tableName}:
-			MetricBatcherFlushSeries.Observe(float64(numSeries))
-			pending = NewPendingBuffer()
-		case req, ok := <-recvCh:
-			if !ok {
-				if !pending.IsEmpty() {
-					copySender <- copyRequest{pending, tableName}
-					MetricBatcherFlushSeries.Observe(float64(numSeries))
+		switch state {
+		case WaitingSendData:
+			numSeries := pending.batch.CountSeries()
+			select {
+			//try to send first, if not then keep batching
+			case copySender <- copyRequest{pending, tableName, doneRecv}:
+				MetricBatcherFlushSeries.Observe(float64(numSeries))
+				pending = NewPendingBuffer()
+				state = WaitingRecvDone
+			case req, ok := <-recvCh:
+				if !ok {
+					if !pending.IsEmpty() && state == WaitingSendData {
+						copySender <- copyRequest{pending, tableName, doneRecv}
+						MetricBatcherFlushSeries.Observe(float64(numSeries))
+					}
+					return
 				}
-				return
+				addReq(req, pending)
 			}
-			addReq(req, pending)
+		case WaitingRecvDone:
+			select {
+			case <-doneRecv:
+				if pending.IsEmpty() {
+					req, ok := <-input
+					if !ok {
+						return
+					}
+
+					addReq(req, pending)
+				}
+				copierReadRequestCh <- readRequest
+				state = WaitingSendData
+			case req, ok := <-recvCh:
+				if !ok {
+					return
+				}
+				addReq(req, pending)
+			}
 		}
+
 	}
 }
