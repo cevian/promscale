@@ -14,7 +14,7 @@ import (
 // insertHandler flushes to the next layer. We don't want too many as this
 // increases the number of lost writes if the connector dies. This number
 // was chosen arbitrarily.
-const flushSize = 2000
+const flushSize = 2000 * 100
 
 type insertDataTask struct {
 	finished *sync.WaitGroup

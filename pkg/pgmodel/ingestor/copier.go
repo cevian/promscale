@@ -135,19 +135,21 @@ func copierGetBatch(batch []copyRequest, in <-chan readRequest) ([]copyRequest, 
 	if !ok {
 		return batch, false
 	}
+	countSeries := copyRequest.data.batch.CountSeries()
 	batch = append(batch, copyRequest)
 
 	//we use a small timeout to prevent low-pressure systems from using up too many
 	//txns and putting pressure on system
 	timeout := time.After(20 * time.Millisecond)
 hot_gather:
-	for len(batch) < cap(batch) {
+	for len(batch) < cap(batch) && countSeries < flushSize {
 		select {
 		case r2 := <-in:
 			copyRequest, ok := <-r2.copySender
 			if !ok {
 				return batch, false
 			}
+			countSeries += copyRequest.data.batch.CountSeries()
 			batch = append(batch, copyRequest)
 		case <-timeout:
 			break hot_gather
