@@ -42,9 +42,9 @@ require (
 	github.com/testcontainers/testcontainers-go v0.10.1-0.20210318151656-2bbeb1e04514
 	github.com/thanos-io/thanos v0.20.1
 	github.com/uber/jaeger-client-go v2.29.1+incompatible
-	go.opentelemetry.io/collector/model v0.38.0
+	go.opentelemetry.io/collector/model v0.44.0
 	go.uber.org/goleak v1.1.12
-	google.golang.org/grpc v1.41.0
+	google.golang.org/grpc v1.44.0
 	gopkg.in/yaml.v2 v2.4.0
 )
 
