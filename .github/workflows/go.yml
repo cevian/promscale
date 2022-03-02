@@ -13,7 +13,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - name: Check out code into the Go module directory
-      uses: actions/checkout@v2
+      uses: actions/checkout@v3
 
     - name: Import environment variables
       run: cat ".github/env" >> $GITHUB_ENV
@@ -42,7 +42,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - name: Check out code into the Go module directory
-      uses: actions/checkout@v2
+      uses: actions/checkout@v3
 
     - name: Import environment variables
       run: cat ".github/env" >> $GITHUB_ENV
@@ -95,7 +95,7 @@ jobs:
         - {name: "TimescaleDB-OSS",          shortname: "tsdb-oss",     ext: false, tsdb: true,  tsdb2: true,  tsdboss: true,  multi: false, pg: 13}
     steps:
     - name: Check out code into the Go module directory
-      uses: actions/checkout@v2
+      uses: actions/checkout@v3
 
     - name: Import environment variables
       run: cat ".github/env" >> $GITHUB_ENV
