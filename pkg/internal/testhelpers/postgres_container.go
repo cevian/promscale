@@ -10,6 +10,7 @@ import (
 	"io"
 	"os"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 
@@ -229,7 +230,7 @@ func DbSetup(DBName string, superuser SuperuserStatus, deferNode2Setup bool, ext
 			}
 		}
 
-		_, err = defaultDb.Exec(context.Background(), fmt.Sprintf("CREATE DATABASE %s OWNER %s", DBName, promUser))
+		_, err = defaultDb.Exec(context.Background(), fmt.Sprintf("CREATE DATABASE %s OWNER %s LC_COLLATE 'en_US.utf8' TEMPLATE template0", DBName, promUser))
 		if err != nil {
 			return err
 		}
@@ -470,7 +471,7 @@ func startPGInstance(
 		ExposedPorts: []string{string(containerPort)},
 		WaitingFor: wait.ForSQL(containerPort, "pgx", func(port nat.Port) string {
 			return "dbname=postgres password=password user=postgres host=127.0.0.1 port=" + port.Port()
-		}).Timeout(120 * time.Second),
+		}).Timeout(40 * time.Second),
 		Env: map[string]string{
 			"POSTGRES_PASSWORD": "password",
 			"PGDATA":            "/var/lib/postgresql/data",
@@ -514,6 +515,7 @@ func startPGInstance(
 		if err := os.Mkdir(bindDir, 0700); err != nil && !os.IsExist(err) {
 			return nil, nil, err
 		}
+		fmt.Println(bindDir)
 		req.BindMounts["/var/lib/postgresql/data"] = bindDir
 	}
 
@@ -531,6 +533,16 @@ func startPGInstance(
 
 	err = container.Start(context.Background())
 	if err != nil {
+		logs, err := container.Logs(context.Background())
+		if err != nil {
+			panic(err)
+		}
+		buf := new(strings.Builder)
+		_, err = io.Copy(buf, logs)
+		if err != nil {
+			panic(err)
+		}
+		fmt.Println(buf.String())
 		return nil, nil, err
 	}
 

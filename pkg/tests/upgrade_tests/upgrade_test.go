@@ -16,7 +16,9 @@ import (
 	"os"
 	"os/exec"
 	"reflect"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/blang/semver/v4"
 	"github.com/docker/go-connections/nat"
@@ -75,7 +77,8 @@ func getDBImages(extensionState testhelpers.ExtensionState) (prev string, clean 
 		//but migration code that works in an older PG version should generally work in a newer one.
 		panic("Only use pg12 for upgrade tests")
 	}
-	return "timescaledev/promscale-extension:0.1.1-ts2-pg12", testhelpers.LatestDBWithPromscaleImageBase + ":latest-ts2-pg12"
+	//return "timescaledev/promscale-extension:0.1.1-ts2-pg12", testhelpers.LatestDBWithPromscaleImageBase + ":latest-ts2-pg12"
+	return "timescaledev/promscale-extension:0.1.1-ts2-pg12", "timescale/timescaledb-ha:pg12-latest"
 }
 
 func TestUpgradeFromPrev(t *testing.T) {
@@ -172,6 +175,7 @@ func getUpgradedDbInfo(t *testing.T, noData bool, useEarliest bool, extensionSta
 
 			}
 			upgradedDbInfo = SnapshotDB(t, dbContainer, *testDatabase, dbTmpDir, db, extensionState)
+			fmt.Println("snapshot " + *testDatabase)
 		})
 	return
 }
@@ -251,6 +255,7 @@ var (
 			Labels: []prompb.Label{
 				{Name: model.MetricNameLabelName, Value: "test3"},
 				{Name: "baz", Value: "quf"},
+				{Name: "foo", Value: "bar"},
 			},
 			Samples: []prompb.Sample{
 				{Timestamp: startTime + 66, Value: 6.0},
@@ -351,6 +356,52 @@ func withDBStartingAtOldVersionAndUpgrading(
 		preUpgrade(dbContainer, tmpDir, connectorHost, connectorPort)
 	}()
 
+	req := testcontainers.ContainerRequest{
+		Image: cleanImage,
+		Env: map[string]string{
+			"POSTGRES_PASSWORD": "password",
+			"PGDATA":            "/var/lib/postgresql/data",
+		},
+		SkipReaper: false,
+	}
+	req.Cmd = []string{
+		"chown", "postgres:postgres", "-R", "/var/lib/postgresql/data",
+	}
+
+	req.BindMounts = make(map[string]string)
+	fmt.Println("datadir", dataDir)
+	req.BindMounts["/var/lib/postgresql/data"] = dataDir
+	container, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
+		ContainerRequest: req,
+		Started:          false,
+	})
+	if err != nil {
+		panic(err)
+	}
+
+	err = container.Start(context.Background())
+	if err != nil {
+		panic(err)
+	}
+
+	time.Sleep(time.Second * 10)
+
+	logs, err := container.Logs(context.Background())
+	if err != nil {
+		panic(err)
+	}
+	buf := new(strings.Builder)
+	_, err = io.Copy(buf, logs)
+	if err != nil {
+		panic(err)
+	}
+	fmt.Println(buf.String())
+	state, err := container.State(context.Background())
+	if err != nil {
+		panic(err)
+	}
+	fmt.Println(state)
+
 	//Start a new connector and migrate.
 	//Then run postUpgrade
 	dbContainer, closer, err := testhelpers.StartDatabaseImage(ctx, cleanImage, tmpDir, dataDir, *printLogs, extensionState)
@@ -359,6 +410,30 @@ func withDBStartingAtOldVersionAndUpgrading(
 	}
 
 	defer func() { _ = closer.Close() }()
+
+	func() {
+		db, err := pgx.Connect(ctx, testhelpers.PgConnectURL(*testDatabase, testhelpers.Superuser))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer db.Close(context.Background())
+
+		_, err = db.Exec(ctx, `
+DO $$DECLARE r record;
+BEGIN
+    FOR r IN SELECT DISTINCT indclass 
+		FROM (SELECT indexrelid::regclass indclass, unnest(string_to_array(indcollation::text, ' ')) coll FROM pg_catalog.pg_index) sub 
+		INNER JOIN pg_catalog.pg_class c ON (c.oid = sub.indclass)
+		WHERE coll !='0' AND c.relkind != 'I'
+    LOOP
+        EXECUTE 'REINDEX INDEX ' || r.indclass;
+    END LOOP;
+END$$;`)
+		if err != nil {
+			t.Fatal(err)
+		}
+		fmt.Println("reindex done " + *testDatabase)
+	}()
 
 	t.Logf("upgrading versions %v => %v", prevVersion, version.Promscale)
 	connectURL := testhelpers.PgConnectURL(*testDatabase, testhelpers.NoSuperuser)
