@@ -70,7 +70,7 @@ jobs:
 
     - name: 'Upload Log Artifact'
       if: ${{ always() }}
-      uses: actions/upload-artifact@v2
+      uses: actions/upload-artifact@v3
       with:
         name: complete-test-run.log
         path: complete-test-run.log
@@ -133,7 +133,7 @@ jobs:
 
     - name: 'Upload Log Artifact'
       if: ${{ always() }}
-      uses: actions/upload-artifact@v2
+      uses: actions/upload-artifact@v3
       with:
         name: ${{ matrix.test-setups.shortname }}-test-run.log
         path: ${{ matrix.test-setups.shortname }}-test-run.log
