@@ -25,7 +25,7 @@ jobs:
       id: go
 
     - name: Use Go module caching
-      uses: actions/cache@v2
+      uses: actions/cache@v3.0.11
       with:
         path: ~/go/pkg/mod
         key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
@@ -52,7 +52,7 @@ jobs:
       id: go
 
     - name: Use Go module caching
-      uses: actions/cache@v2
+      uses: actions/cache@v3.0.11
       with:
         path: ~/go/pkg/mod
         key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
@@ -92,7 +92,7 @@ jobs:
       id: go
 
     - name: Use Go module caching
-      uses: actions/cache@v2
+      uses: actions/cache@v3.0.11
       with:
         path: ~/go/pkg/mod
         key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
